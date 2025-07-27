@@ -75,92 +75,78 @@ export default function Commander() {
     }
   };
 
+  // Returns the execution path based on Finder selection or current window.
   const getCurrentFinderPath = async (): Promise<string | null> => {
     try {
-      // First check if Finder is the frontmost application
-      const frontAppScript = `
-        tell application "System Events"
-          return name of first application process whose frontmost is true
+      const script = `
+        tell application \"System Events\"
+          set frontApp to name of first application process whose frontmost is true
         end tell
-      `;
-
-      const { stdout: frontApp } = await execAsync(`osascript -e '${frontAppScript}'`);
-      const frontAppName = frontApp.trim();
-
-      if (preferences.debugMode) {
-        console.log("Frontmost app:", frontAppName);
-      }
-
-      if (frontAppName !== "Finder") {
-        return null;
-      }
-
-      // Try the primary method first
-      try {
-        const finderPathScript = `
-          tell application "Finder"
+        
+        tell application \"Finder\"
+          try
+            -- Always try desktop selection first, regardless of frontmost app
             try
-              if (count of windows) > 0 then
-                set currentWindow to front window
-                if (count of selection) > 0 then
-                  set selectedItem to item 1 of selection
-                  if kind of selectedItem is "Folder" then
-                    return POSIX path of (selectedItem as alias)
-                  else
-                    return POSIX path of (container of selectedItem as alias)
-                  end if
+              set desktopSelection to selection of desktop
+              if (count of desktopSelection) > 0 then
+                set sel to item 1 of desktopSelection
+                if class of sel is folder then
+                  return POSIX path of (sel as alias)
                 else
-                  return POSIX path of (target of currentWindow as alias)
+                  return POSIX path of desktop
                 end if
-              else
-                return POSIX path of desktop
               end if
-            on error
-              return POSIX path of desktop
+            on error desktopErr
+              -- If desktop selection fails, try global selection
+              if (count of selection) > 0 then
+                set sel to item 1 of selection
+                set selPath to POSIX path of (sel as alias)
+                set desktopPath to POSIX path of desktop
+                if selPath starts with desktopPath then
+                  if class of sel is folder then
+                    return selPath
+                  else
+                    return desktopPath
+                  end if
+                end if
+              end if
             end try
-          end tell
-        `;
-
-        const { stdout: path } = await execAsync(`osascript -e '${finderPathScript}'`);
-        const finderPath = path.trim();
-        
-        if (preferences.debugMode) {
-          console.log("Finder path detected:", finderPath);
-        }
-        
-        return finderPath || null;
-      } catch (primaryError) {
-        if (preferences.debugMode) {
-          console.log("Primary method failed, trying fallback:", primaryError);
-        }
-
-        // Fallback method - just get the front window target
-        const fallbackScript = `
-          tell application "Finder"
-            try
-              if (count of windows) > 0 then
+            
+            -- If no desktop selection found, use normal Finder logic
+            if frontApp is \"Finder\" then
+              if (count of selection) > 0 then
+                set sel to item 1 of selection
+                if class of sel is folder then
+                  return POSIX path of (sel as alias)
+                else
+                  return POSIX path of (container of sel as alias)
+                end if
+              else if (count of windows) > 0 then
                 return POSIX path of (target of front window as alias)
               else
                 return POSIX path of desktop
               end if
-            on error
+            else
+              -- If not Finder and no desktop selection, return desktop
               return POSIX path of desktop
-            end try
-          end tell
-        `;
+            end if
+          on error errMsg
+            return \"\"
+          end try
+        end tell
+      `;
 
-        const { stdout: fallbackPath } = await execAsync(`osascript -e '${fallbackScript}'`);
-        const finalPath = fallbackPath.trim();
-        
-        if (preferences.debugMode) {
-          console.log("Fallback path detected:", finalPath);
-        }
-        
-        return finalPath || null;
+      const { stdout } = await execAsync(`osascript -e '${script}'`);
+      const path = stdout.trim();
+
+      if (preferences.debugMode) {
+        console.log("Finder path detected:", path);
       }
+
+      return path || null;
     } catch (error) {
       if (preferences.debugMode) {
-        console.log("Error getting Finder path:", error);
+        console.log("Error detecting Finder path:", error);
       }
       return null;
     }
@@ -547,6 +533,248 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
                 } catch (error) {
                   console.error("Direct test error:", error);
                   updateCommandHistory("node -v (direct)", undefined, error instanceof Error ? error.message : "Unknown error");
+                }
+              }}
+            />
+            <Action
+              title="Test AppleScript Access"
+              icon={Icon.Gear}
+              onAction={async () => {
+                try {
+                  await showToast({
+                    style: Toast.Style.Animated,
+                    title: "Testing AppleScript access...",
+                  });
+
+                  // Simple test to see if we can access Finder
+                  const testScript = `
+                    tell application "Finder"
+                      return "Success: " & (count of windows)
+                    end tell
+                  `;
+                  
+                  const { stdout } = await execAsync(`osascript -e '${testScript}'`);
+                  
+                  await showToast({
+                    style: Toast.Style.Success,
+                    title: "AppleScript Test",
+                    message: `Result: ${stdout.trim()}`,
+                  });
+                  
+                } catch (error) {
+                  await showToast({
+                    style: Toast.Style.Failure,
+                    title: "AppleScript Failed",
+                    message: error instanceof Error ? error.message : "Unknown error",
+                  });
+                }
+              }}
+            />
+            <Action
+              title="Detailed Path Debug"
+              icon={Icon.MagnifyingGlass}
+              onAction={async () => {
+                setPreferences(prev => ({ ...prev, debugMode: true }));
+                
+                try {
+                  await showToast({
+                    style: Toast.Style.Animated,
+                    title: "Detailed path debugging...",
+                  });
+
+                  // Test 1: Check frontmost app
+                  const frontAppTest = `
+                    tell application "System Events"
+                      return "Frontmost app: " & name of first application process whose frontmost is true
+                    end tell
+                  `;
+                  
+                  const { stdout: frontAppResult } = await execAsync(`osascript -e '${frontAppTest}'`);
+                  
+                  // Test 2: Check desktop selection specifically
+                  const desktopSelectionTest = `
+                    tell application "Finder"
+                      try
+                        set desktopSelection to selection of desktop
+                        if (count of desktopSelection) > 0 then
+                          set sel to item 1 of desktopSelection
+                          return "Desktop selection found: " & POSIX path of (sel as alias) & " | Class: " & class of sel
+                        else
+                          return "No desktop selection"
+                        end if
+                      on error errMsg
+                        return "Desktop selection error: " & errMsg
+                      end try
+                    end tell
+                  `;
+                  
+                  const { stdout: desktopSelectionResult } = await execAsync(`osascript -e '${desktopSelectionTest}'`);
+                  
+                  // Test 3: Check global selection
+                  const globalSelectionTest = `
+                    tell application "Finder"
+                      try
+                        if (count of selection) > 0 then
+                          set sel to item 1 of selection
+                          set selPath to POSIX path of (sel as alias)
+                          set desktopPath to POSIX path of desktop
+                          return "Global selection: " & selPath & " | Is on desktop: " & (selPath starts with desktopPath) & " | Class: " & class of sel
+                        else
+                          return "No global selection"
+                        end if
+                      on error errMsg
+                        return "Global selection error: " & errMsg
+                      end try
+                    end tell
+                  `;
+                  
+                  const { stdout: globalSelectionResult } = await execAsync(`osascript -e '${globalSelectionTest}'`);
+                  
+                  // Test 4: Check Finder windows
+                  const windowTest = `
+                    tell application "Finder"
+                      try
+                        if (count of windows) > 0 then
+                          set frontWindow to front window
+                          return "Front window target: " & POSIX path of (target of frontWindow as alias)
+                        else
+                          return "No Finder windows"
+                        end if
+                      on error errMsg
+                        return "Window error: " & errMsg
+                      end try
+                    end tell
+                  `;
+                  
+                  const { stdout: windowResult } = await execAsync(`osascript -e '${windowTest}'`);
+                  
+                  // Test 5: Get desktop path
+                  const desktopPathTest = `
+                    tell application "Finder"
+                      return "Desktop path: " & POSIX path of desktop
+                    end tell
+                  `;
+                  
+                  const { stdout: desktopPathResult } = await execAsync(`osascript -e '${desktopPathTest}'`);
+                  
+                  // Test 6: Try the actual path detection
+                  const path = await getCurrentFinderPath();
+                  
+                  const debugOutput = `Front App: ${frontAppResult.trim()}\n\nDesktop Selection: ${desktopSelectionResult.trim()}\n\nGlobal Selection: ${globalSelectionResult.trim()}\n\nFront Window: ${windowResult.trim()}\n\nDesktop Path: ${desktopPathResult.trim()}\n\nFinal Result: ${path || "null"}`;
+                  
+                  const debugResult = {
+                    command: "Detailed Path Debug",
+                    lastUsed: Date.now(),
+                    useCount: 1,
+                    output: debugOutput,
+                    error: undefined,
+                    executionPath: path || undefined,
+                  };
+                  setSelectedCommand(debugResult);
+                  setShowDetailView(true);
+                  
+                } catch (error) {
+                  await showToast({
+                    style: Toast.Style.Failure,
+                    title: "Debug failed",
+                    message: error instanceof Error ? error.message : "Unknown error",
+                  });
+                }
+              }}
+            />
+            <Action
+              title="Debug Path Detection"
+              icon={Icon.Bug}
+              onAction={async () => {
+                setPreferences(prev => ({ ...prev, debugMode: true }));
+                
+                try {
+                  await showToast({
+                    style: Toast.Style.Animated,
+                    title: "Testing path detection...",
+                  });
+
+                  // Test 1: Basic AppleScript execution
+                  const basicTest = `
+                    tell application "Finder"
+                      return "Finder is accessible"
+                    end tell
+                  `;
+                  
+                  const { stdout: basicResult } = await execAsync(`osascript -e '${basicTest}'`);
+                  
+                  // Test 2: Check which app is frontmost
+                  const frontAppTest = `
+                    tell application "System Events"
+                      return "Frontmost app: " & name of first application process whose frontmost is true
+                    end tell
+                  `;
+                  
+                  const { stdout: frontAppResult } = await execAsync(`osascript -e '${frontAppTest}'`);
+                  
+                  // Test 3: Check selection count
+                  const selectionTest = `
+                    tell application "Finder"
+                      return "Selection count: " & (count of selection)
+                    end tell
+                  `;
+                  
+                  const { stdout: selectionResult } = await execAsync(`osascript -e '${selectionTest}'`);
+                  
+                  // Test 4: Check desktop selection specifically
+                  const desktopSelectionTest = `
+                    tell application "Finder"
+                      try
+                        set desktopSelection to selection of desktop
+                        return "Desktop selection count: " & (count of desktopSelection)
+                      on error errMsg
+                        return "Desktop selection error: " & errMsg
+                      end try
+                    end tell
+                  `;
+                  
+                  const { stdout: desktopSelectionResult } = await execAsync(`osascript -e '${desktopSelectionTest}'`);
+                  
+                  // Test 5: Check window count
+                  const windowTest = `
+                    tell application "Finder"
+                      return "Window count: " & (count of windows)
+                    end tell
+                  `;
+                  
+                  const { stdout: windowResult } = await execAsync(`osascript -e '${windowTest}'`);
+                  
+                  // Test 6: Get desktop path
+                  const desktopTest = `
+                    tell application "Finder"
+                      return "Desktop path: " & POSIX path of desktop
+                    end tell
+                  `;
+                  
+                  const { stdout: desktopResult } = await execAsync(`osascript -e '${desktopTest}'`);
+                  
+                  // Test 7: Try the actual path detection
+                  const path = await getCurrentFinderPath();
+                  
+                  const debugOutput = `Basic Test: ${basicResult.trim()}\n\nFront App Test: ${frontAppResult.trim()}\n\nSelection Test: ${selectionResult.trim()}\n\nDesktop Selection Test: ${desktopSelectionResult.trim()}\n\nWindow Test: ${windowResult.trim()}\n\nDesktop Test: ${desktopResult.trim()}\n\nPath Detection Result: ${path || "null"}`;
+                  
+                  const debugResult = {
+                    command: "Debug Path Detection",
+                    lastUsed: Date.now(),
+                    useCount: 1,
+                    output: debugOutput,
+                    error: undefined,
+                    executionPath: path || undefined,
+                  };
+                  setSelectedCommand(debugResult);
+                  setShowDetailView(true);
+                  
+                } catch (error) {
+                  await showToast({
+                    style: Toast.Style.Failure,
+                    title: "Debug failed",
+                    message: error instanceof Error ? error.message : "Unknown error",
+                  });
                 }
               }}
             />
