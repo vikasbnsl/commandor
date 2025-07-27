@@ -37,17 +37,21 @@ You can customize the extension behavior in Raycast preferences:
 ## Troubleshooting
 
 ### "Command not found" errors
+
 If you get "command not found" errors (like with `node`, `npm`, `brew`, etc.), try:
+
 1. Set the **Shell Profile** preference to your shell configuration file (e.g., `~/.zshrc`)
 2. Make sure the command is installed and available in your shell
 3. Check that your PATH environment variable includes the necessary directories
 
 ### Permission errors
+
 Some commands may require elevated permissions. The extension runs commands with your user permissions.
 
 ## How LRU Works
 
 Commands are automatically sorted by "Least Recently Used" order:
+
 - New commands are added to the end of the list
 - When you execute an existing command, it moves to the end (most recently used)
 - Commands that haven't been used in a while appear at the top
@@ -56,6 +60,7 @@ Commands are automatically sorted by "Least Recently Used" order:
 ## Examples
 
 Common commands you might use:
+
 - `brew update` - Update Homebrew packages
 - `git status` - Check git repository status
 - `ls -la` - List all files with details
@@ -66,10 +71,21 @@ Common commands you might use:
 ## Development
 
 This extension is built with:
+
 - React
 - TypeScript
 - Raycast API
 - Node.js child_process for command execution
+
+## Project Structure
+
+```
+src/
+  components/      # React components
+  utils/           # Helper utilities
+  types.ts         # Shared TypeScript types
+  commandor.tsx    # Entry point exporting the Commander component
+```
 
 ## License
 
