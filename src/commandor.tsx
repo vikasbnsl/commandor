@@ -25,6 +25,7 @@ interface CommandHistory {
   useCount: number;
   output?: string;
   error?: string;
+  executionPath?: string;
 }
 
 interface Preferences {
@@ -74,6 +75,97 @@ export default function Commander() {
     }
   };
 
+  const getCurrentFinderPath = async (): Promise<string | null> => {
+    try {
+      // First check if Finder is the frontmost application
+      const frontAppScript = `
+        tell application "System Events"
+          return name of first application process whose frontmost is true
+        end tell
+      `;
+
+      const { stdout: frontApp } = await execAsync(`osascript -e '${frontAppScript}'`);
+      const frontAppName = frontApp.trim();
+
+      if (preferences.debugMode) {
+        console.log("Frontmost app:", frontAppName);
+      }
+
+      if (frontAppName !== "Finder") {
+        return null;
+      }
+
+      // Try the primary method first
+      try {
+        const finderPathScript = `
+          tell application "Finder"
+            try
+              if (count of windows) > 0 then
+                set currentWindow to front window
+                if (count of selection) > 0 then
+                  set selectedItem to item 1 of selection
+                  if kind of selectedItem is "Folder" then
+                    return POSIX path of (selectedItem as alias)
+                  else
+                    return POSIX path of (container of selectedItem as alias)
+                  end if
+                else
+                  return POSIX path of (target of currentWindow as alias)
+                end if
+              else
+                return POSIX path of desktop
+              end if
+            on error
+              return POSIX path of desktop
+            end try
+          end tell
+        `;
+
+        const { stdout: path } = await execAsync(`osascript -e '${finderPathScript}'`);
+        const finderPath = path.trim();
+        
+        if (preferences.debugMode) {
+          console.log("Finder path detected:", finderPath);
+        }
+        
+        return finderPath || null;
+      } catch (primaryError) {
+        if (preferences.debugMode) {
+          console.log("Primary method failed, trying fallback:", primaryError);
+        }
+
+        // Fallback method - just get the front window target
+        const fallbackScript = `
+          tell application "Finder"
+            try
+              if (count of windows) > 0 then
+                return POSIX path of (target of front window as alias)
+              else
+                return POSIX path of desktop
+              end if
+            on error
+              return POSIX path of desktop
+            end try
+          end tell
+        `;
+
+        const { stdout: fallbackPath } = await execAsync(`osascript -e '${fallbackScript}'`);
+        const finalPath = fallbackPath.trim();
+        
+        if (preferences.debugMode) {
+          console.log("Fallback path detected:", finalPath);
+        }
+        
+        return finalPath || null;
+      }
+    } catch (error) {
+      if (preferences.debugMode) {
+        console.log("Error getting Finder path:", error);
+      }
+      return null;
+    }
+  };
+
   const saveCommandHistory = async (history: CommandHistory[]) => {
     try {
       await LocalStorage.setItem("commandHistory", JSON.stringify(history));
@@ -82,7 +174,7 @@ export default function Commander() {
     }
   };
 
-  const updateCommandHistory = (command: string, output?: string, error?: string) => {
+  const updateCommandHistory = (command: string, output?: string, error?: string, executionPath?: string) => {
     const now = Date.now();
     const newHistory = [...commandHistory];
 
@@ -97,6 +189,7 @@ export default function Commander() {
         useCount: newHistory[existingIndex].useCount + 1,
         output,
         error,
+        executionPath,
       };
     } else {
       // Add new command
@@ -106,6 +199,7 @@ export default function Commander() {
         useCount: 1,
         output,
         error,
+        executionPath,
       });
     }
 
@@ -131,6 +225,9 @@ export default function Commander() {
         message: command,
       });
 
+      // Check if Finder is in focus and get the current path
+      const finderPath = await getCurrentFinderPath();
+      
       // Build the command with comprehensive shell initialization
       let finalCommand = command;
       
@@ -143,6 +240,15 @@ export default function Commander() {
           finalCommand = `source ~/.zshrc 2>/dev/null; ${command}`;
         } else if (preferences.defaultShell.includes('bash')) {
           finalCommand = `source ~/.bash_profile 2>/dev/null || source ~/.bashrc 2>/dev/null; ${command}`;
+        }
+      }
+
+      // If we have a Finder path, prepend cd command
+      if (finderPath && finderPath.trim()) {
+        finalCommand = `cd "${finderPath}" && ${finalCommand}`;
+        
+        if (preferences.debugMode) {
+          console.log("Executing in Finder directory:", finderPath);
         }
       }
 
@@ -184,11 +290,11 @@ export default function Commander() {
         await showToast({
           style: Toast.Style.Success,
           title: "Command executed successfully",
-          message: "Result visible in the list above",
+          message: finderPath ? `In: ${finderPath}` : "Result visible in the list above",
         });
       }
 
-      updateCommandHistory(command, stdout, stderr);
+      updateCommandHistory(command, stdout, stderr, finderPath || undefined);
       
       // Set the last executed command to highlight it in the UI
       setLastExecutedCommand(command);
@@ -199,7 +305,8 @@ export default function Commander() {
         lastUsed: Date.now(),
         useCount: 1,
         output: stdout,
-        error: stderr
+        error: stderr,
+        executionPath: finderPath || undefined,
       };
       setSelectedCommand(executedCommand);
       setShowDetailView(true);
@@ -236,7 +343,8 @@ export default function Commander() {
         lastUsed: Date.now(),
         useCount: 1,
         output: undefined,
-        error: errorMessage
+        error: errorMessage,
+        executionPath: undefined,
       };
       setSelectedCommand(failedCommand);
       setShowDetailView(true);
@@ -313,6 +421,7 @@ export default function Commander() {
 # ${selectedCommand.command}
 
 **Last executed:** ${new Date(selectedCommand.lastUsed).toLocaleString()}
+**Execution Path:** ${selectedCommand.executionPath || "N/A"}
 
 ---
 
@@ -442,6 +551,46 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
               }}
             />
             <Action
+              title="Test Finder Path"
+              icon={Icon.Folder}
+              onAction={async () => {
+                // Enable debug mode temporarily for this test
+                const wasDebugMode = preferences.debugMode;
+                setPreferences(prev => ({ ...prev, debugMode: true }));
+                
+                try {
+                  await showToast({
+                    style: Toast.Style.Animated,
+                    title: "Testing Finder Path Detection...",
+                  });
+
+                  const path = await getCurrentFinderPath();
+                  
+                  await showToast({
+                    style: path ? Toast.Style.Success : Toast.Style.Failure,
+                    title: path ? "Finder Path Detected" : "No Finder Path",
+                    message: path || "Make sure Finder is active and try again",
+                  });
+
+                  // Show in detail view for better visibility
+                  const testResult = {
+                    command: "Finder Path Test",
+                    lastUsed: Date.now(),
+                    useCount: 1,
+                    output: path ? `Detected path: ${path}` : "No path detected - make sure Finder is the active application",
+                    error: undefined,
+                    executionPath: path || undefined,
+                  };
+                  setSelectedCommand(testResult);
+                  setShowDetailView(true);
+                  
+                } finally {
+                  // Restore debug mode
+                  setPreferences(prev => ({ ...prev, debugMode: wasDebugMode }));
+                }
+              }}
+            />
+            <Action
               title="Toggle Debug Mode"
               icon={Icon.Bug}
               onAction={() => {
@@ -502,6 +651,7 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
             title={item.command}
             subtitle={
               `Last time: ${new Date(item.lastUsed).toLocaleString()}\n` +
+              (item.executionPath ? `📁 Path: ${item.executionPath}\n` : '') +
               (item.error 
                 ? `❌ Error: ${item.error.length > 50 ? item.error.substring(0, 50) + '...' : item.error}`
                 : (item.output !== undefined)
