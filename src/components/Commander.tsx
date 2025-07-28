@@ -810,6 +810,12 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
             actions={
               <ActionPanel>
                 <Action
+                  title="Execute Command"
+                  icon={Icon.Play}
+                  onAction={() => executeCommand(item.command)}
+                  shortcut={{ modifiers: ["cmd"], key: "enter" }}
+                />
+                <Action
                   title="View Details"
                   icon={Icon.Eye}
                   onAction={() => {
@@ -817,12 +823,6 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
                     setShowDetailView(true);
                   }}
                   shortcut={{ modifiers: ["cmd"], key: "d" }}
-                />
-                <Action
-                  title="Execute Command"
-                  icon={Icon.Play}
-                  onAction={() => executeCommand(item.command)}
-                  shortcut={{ modifiers: ["cmd"], key: "enter" }}
                 />
                 <Action
                   title="Copy Command"
