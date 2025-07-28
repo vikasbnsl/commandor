@@ -389,356 +389,17 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
                 setSearchText("");
               }
             }}
-            shortcut={{ modifiers: ["cmd"], key: "enter" }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
           />
           <Action
             title="Clear History"
             icon={Icon.Trash}
             style={Action.Style.Destructive}
             onAction={clearHistory}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "delete" }}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "backspace" }}
           />
           <Action
-            title="Test Environment"
-            icon={Icon.Gear}
-            onAction={async () => {
-              await executeCommand("echo $PATH && which node && node --version");
-            }}
-          />
-          <Action
-            title="Simple Test"
-            icon={Icon.ArrowRight}
-            onAction={async () => {
-              await executeCommand("echo 'Hello World'");
-            }}
-          />
-          <Action
-            title="Node Version Test"
-            icon={Icon.ArrowRight}
-            onAction={async () => {
-              await executeCommand("node -v");
-            }}
-          />
-          <Action
-            title="Direct Test (No Shell Init)"
-            icon={Icon.ArrowRight}
-            onAction={async () => {
-              // Test direct execution without shell initialization
-              try {
-                const { stdout, stderr } = await execAsync("node -v", {
-                  shell: preferences.defaultShell,
-                  timeout: 30000,
-                });
-                console.log("Direct test output:", { stdout, stderr });
-                updateCommandHistory("node -v (direct)", stdout, stderr);
-                await showToast({
-                  style: Toast.Style.Success,
-                  title: "Direct test completed",
-                  message: stdout || "No output",
-                });
-              } catch (error) {
-                console.error("Direct test error:", error);
-                updateCommandHistory(
-                  "node -v (direct)",
-                  undefined,
-                  error instanceof Error ? error.message : "Unknown error",
-                );
-              }
-            }}
-          />
-          <Action
-            title="Test AppleScript Access"
-            icon={Icon.Gear}
-            onAction={async () => {
-              try {
-                await showToast({
-                  style: Toast.Style.Animated,
-                  title: "Testing AppleScript access...",
-                });
-
-                // Simple test to see if we can access Finder
-                const testScript = `
-                    tell application "Finder"
-                      return "Success: " & (count of windows)
-                    end tell
-                  `;
-
-                const { stdout } = await execAsync(`osascript -e '${testScript}'`);
-
-                await showToast({
-                  style: Toast.Style.Success,
-                  title: "AppleScript Test",
-                  message: `Result: ${stdout.trim()}`,
-                });
-              } catch (error) {
-                await showToast({
-                  style: Toast.Style.Failure,
-                  title: "AppleScript Failed",
-                  message: error instanceof Error ? error.message : "Unknown error",
-                });
-              }
-            }}
-          />
-          <Action
-            title="Detailed Path Debug"
-            icon={Icon.MagnifyingGlass}
-            onAction={async () => {
-              setPreferences((prev) => ({ ...prev, debugMode: true }));
-
-              try {
-                await showToast({
-                  style: Toast.Style.Animated,
-                  title: "Detailed path debugging...",
-                });
-
-                // Test 1: Check frontmost app
-                const frontAppTest = `
-                    tell application "System Events"
-                      return "Frontmost app: " & name of first application process whose frontmost is true
-                    end tell
-                  `;
-
-                const { stdout: frontAppResult } = await execAsync(`osascript -e '${frontAppTest}'`);
-
-                // Test 2: Check desktop selection specifically
-                const desktopSelectionTest = `
-                    tell application "Finder"
-                      try
-                        set desktopSelection to selection of desktop
-                        if (count of desktopSelection) > 0 then
-                          set sel to item 1 of desktopSelection
-                          return "Desktop selection found: " & POSIX path of (sel as alias) & " | Class: " & class of sel
-                        else
-                          return "No desktop selection"
-                        end if
-                      on error errMsg
-                        return "Desktop selection error: " & errMsg
-                      end try
-                    end tell
-                  `;
-
-                const { stdout: desktopSelectionResult } = await execAsync(`osascript -e '${desktopSelectionTest}'`);
-
-                // Test 3: Check global selection
-                const globalSelectionTest = `
-                    tell application "Finder"
-                      try
-                        if (count of selection) > 0 then
-                          set sel to item 1 of selection
-                          set selPath to POSIX path of (sel as alias)
-                          set desktopPath to POSIX path of desktop
-                          return "Global selection: " & selPath & " | Is on desktop: " & (selPath starts with desktopPath) & " | Class: " & class of sel
-                        else
-                          return "No global selection"
-                        end if
-                      on error errMsg
-                        return "Global selection error: " & errMsg
-                      end try
-                    end tell
-                  `;
-
-                const { stdout: globalSelectionResult } = await execAsync(`osascript -e '${globalSelectionTest}'`);
-
-                // Test 4: Check Finder windows
-                const windowTest = `
-                    tell application "Finder"
-                      try
-                        if (count of windows) > 0 then
-                          set frontWindow to front window
-                          return "Front window target: " & POSIX path of (target of frontWindow as alias)
-                        else
-                          return "No Finder windows"
-                        end if
-                      on error errMsg
-                        return "Window error: " & errMsg
-                      end try
-                    end tell
-                  `;
-
-                const { stdout: windowResult } = await execAsync(`osascript -e '${windowTest}'`);
-
-                // Test 5: Get desktop path
-                const desktopPathTest = `
-                    tell application "Finder"
-                      return "Desktop path: " & POSIX path of desktop
-                    end tell
-                  `;
-
-                const { stdout: desktopPathResult } = await execAsync(`osascript -e '${desktopPathTest}'`);
-
-                // Test 6: Try the actual path detection
-                const path = await getCurrentFinderPath();
-
-                const debugOutput = `Front App: ${frontAppResult.trim()}\n\nDesktop Selection: ${desktopSelectionResult.trim()}\n\nGlobal Selection: ${globalSelectionResult.trim()}\n\nFront Window: ${windowResult.trim()}\n\nDesktop Path: ${desktopPathResult.trim()}\n\nFinal Result: ${path || "null"}`;
-
-                const debugResult = {
-                  command: "Detailed Path Debug",
-                  lastUsed: Date.now(),
-                  useCount: 1,
-                  output: debugOutput,
-                  error: undefined,
-                  executionPath: path || undefined,
-                };
-                setSelectedCommand(debugResult);
-                setShowDetailView(true);
-              } catch (error) {
-                await showToast({
-                  style: Toast.Style.Failure,
-                  title: "Debug failed",
-                  message: error instanceof Error ? error.message : "Unknown error",
-                });
-              }
-            }}
-          />
-          <Action
-            title="Debug Path Detection"
-            icon={Icon.Bug}
-            onAction={async () => {
-              setPreferences((prev) => ({ ...prev, debugMode: true }));
-
-              try {
-                await showToast({
-                  style: Toast.Style.Animated,
-                  title: "Testing path detection...",
-                });
-
-                // Test 1: Basic AppleScript execution
-                const basicTest = `
-                    tell application "Finder"
-                      return "Finder is accessible"
-                    end tell
-                  `;
-
-                const { stdout: basicResult } = await execAsync(`osascript -e '${basicTest}'`);
-
-                // Test 2: Check which app is frontmost
-                const frontAppTest = `
-                    tell application "System Events"
-                      return "Frontmost app: " & name of first application process whose frontmost is true
-                    end tell
-                  `;
-
-                const { stdout: frontAppResult } = await execAsync(`osascript -e '${frontAppTest}'`);
-
-                // Test 3: Check selection count
-                const selectionTest = `
-                    tell application "Finder"
-                      return "Selection count: " & (count of selection)
-                    end tell
-                  `;
-
-                const { stdout: selectionResult } = await execAsync(`osascript -e '${selectionTest}'`);
-
-                // Test 4: Check desktop selection specifically
-                const desktopSelectionTest = `
-                    tell application "Finder"
-                      try
-                        set desktopSelection to selection of desktop
-                        return "Desktop selection count: " & (count of desktopSelection)
-                      on error errMsg
-                        return "Desktop selection error: " & errMsg
-                      end try
-                    end tell
-                  `;
-
-                const { stdout: desktopSelectionResult } = await execAsync(`osascript -e '${desktopSelectionTest}'`);
-
-                // Test 5: Check window count
-                const windowTest = `
-                    tell application "Finder"
-                      return "Window count: " & (count of windows)
-                    end tell
-                  `;
-
-                const { stdout: windowResult } = await execAsync(`osascript -e '${windowTest}'`);
-
-                // Test 6: Get desktop path
-                const desktopTest = `
-                    tell application "Finder"
-                      return "Desktop path: " & POSIX path of desktop
-                    end tell
-                  `;
-
-                const { stdout: desktopResult } = await execAsync(`osascript -e '${desktopTest}'`);
-
-                // Test 7: Try the actual path detection
-                const path = await getCurrentFinderPath();
-
-                const debugOutput = `Basic Test: ${basicResult.trim()}\n\nFront App Test: ${frontAppResult.trim()}\n\nSelection Test: ${selectionResult.trim()}\n\nDesktop Selection Test: ${desktopSelectionResult.trim()}\n\nWindow Test: ${windowResult.trim()}\n\nDesktop Test: ${desktopResult.trim()}\n\nPath Detection Result: ${path || "null"}`;
-
-                const debugResult = {
-                  command: "Debug Path Detection",
-                  lastUsed: Date.now(),
-                  useCount: 1,
-                  output: debugOutput,
-                  error: undefined,
-                  executionPath: path || undefined,
-                };
-                setSelectedCommand(debugResult);
-                setShowDetailView(true);
-              } catch (error) {
-                await showToast({
-                  style: Toast.Style.Failure,
-                  title: "Debug failed",
-                  message: error instanceof Error ? error.message : "Unknown error",
-                });
-              }
-            }}
-          />
-          <Action
-            title="Test Finder Path"
-            icon={Icon.Folder}
-            onAction={async () => {
-              // Enable debug mode temporarily for this test
-              const wasDebugMode = preferences.debugMode;
-              setPreferences((prev) => ({ ...prev, debugMode: true }));
-
-              try {
-                await showToast({
-                  style: Toast.Style.Animated,
-                  title: "Testing Finder Path Detection...",
-                });
-
-                const path = await getCurrentFinderPath();
-
-                await showToast({
-                  style: path ? Toast.Style.Success : Toast.Style.Failure,
-                  title: path ? "Finder Path Detected" : "No Finder Path",
-                  message: path || "Make sure Finder is active and try again",
-                });
-
-                // Show in detail view for better visibility
-                const testResult = {
-                  command: "Finder Path Test",
-                  lastUsed: Date.now(),
-                  useCount: 1,
-                  output: path
-                    ? `Detected path: ${path}`
-                    : "No path detected - make sure Finder is the active application",
-                  error: undefined,
-                  executionPath: path || undefined,
-                };
-                setSelectedCommand(testResult);
-                setShowDetailView(true);
-              } finally {
-                // Restore debug mode
-                setPreferences((prev) => ({ ...prev, debugMode: wasDebugMode }));
-              }
-            }}
-          />
-          <Action
-            title="Toggle Debug Mode"
-            icon={Icon.Bug}
-            onAction={() => {
-              setPreferences((prev) => ({ ...prev, debugMode: !prev.debugMode }));
-              showToast({
-                style: Toast.Style.Success,
-                title: `Debug mode ${preferences.debugMode ? "disabled" : "enabled"}`,
-              });
-            }}
-          />
-          <Action
-            title="Clear Storage & History"
+            title="Clear Storage and History"
             icon={Icon.ExclamationMark}
             style={Action.Style.Destructive}
             onAction={async () => {
@@ -767,7 +428,7 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
                   executeCommand(searchText.trim());
                   setSearchText("");
                 }}
-                shortcut={{ modifiers: ["cmd"], key: "enter" }}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
               />
             </ActionPanel>
           }
@@ -810,7 +471,7 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
                   title="Execute Command"
                   icon={Icon.Play}
                   onAction={() => executeCommand(item.command)}
-                  shortcut={{ modifiers: ["cmd"], key: "enter" }}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
                 />
                 <Action
                   title="View Details"
@@ -852,7 +513,7 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
                   icon={Icon.Trash}
                   style={Action.Style.Destructive}
                   onAction={() => deleteCommand(item.command)}
-                  shortcut={{ modifiers: ["cmd"], key: "delete" }}
+                  shortcut={{ modifiers: ["cmd"], key: "backspace" }}
                 />
               </ActionPanel>
             }
