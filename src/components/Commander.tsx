@@ -185,7 +185,6 @@ export default function Commander() {
         await showToast({
           style: Toast.Style.Success,
           title: "Command executed successfully",
-          message: finderPath ? `In: ${finderPath}` : "Result visible in the list above",
         });
       }
 
@@ -332,7 +331,7 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
               title="Back to List"
               icon={Icon.ArrowLeft}
               onAction={() => setShowDetailView(false)}
-              shortcut={{ modifiers: ["cmd"], key: "arrowLeft" }}
+              shortcut={{ modifiers: [], key: "delete" }}
             />
             <Action
               title="Execute Again"
