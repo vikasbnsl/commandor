@@ -331,7 +331,6 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
               title="Back to List"
               icon={Icon.ArrowLeft}
               onAction={() => setShowDetailView(false)}
-              shortcut={{ modifiers: [], key: "delete" }}
             />
             <Action
               title="Execute Again"
@@ -340,7 +339,6 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
                 setShowDetailView(false);
                 executeCommand(selectedCommand.command);
               }}
-              shortcut={{ modifiers: ["cmd"], key: "enter" }}
             />
             <Action
               title="Copy Command"
