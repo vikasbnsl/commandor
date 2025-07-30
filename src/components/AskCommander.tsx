@@ -9,28 +9,24 @@ import {
   Icon,
   Color,
   Detail,
+  useNavigation,
 } from "@raycast/api";
 import { useAI } from "@raycast/utils";
-import { exec } from "child_process";
-import { promisify } from "util";
 import { LocalStorage } from "@raycast/api";
-import { CommandHistory, Preferences } from "../types";
-import { getCurrentFinderPath } from "../utils/finder";
-
-const execAsync = promisify(exec);
+import { Preferences } from "../types";
+import Commander from "./Commander";
 
 export default function AskCommander() {
   const [searchText, setSearchText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [showResult, setShowResult] = useState(false);
-  const [selectedCommand, setSelectedCommand] = useState<CommandHistory | null>(null);
   const [preferences, setPreferences] = useState<Preferences>({
     maxHistorySize: 50,
     defaultShell: "/bin/zsh",
     shellProfile: "",
     debugMode: false,
   });
+
+  const { push } = useNavigation();
 
   // Load preferences on component mount
   useEffect(() => {
@@ -106,7 +102,7 @@ Generate the exact command:`;
     // Try fallback first for common patterns
     const fallbackCommand = getFallbackCommand(searchText);
     if (fallbackCommand) {
-      executeCommand(fallbackCommand);
+      navigateToCommander(fallbackCommand);
       return;
     }
 
@@ -131,7 +127,29 @@ Generate the exact command:`;
     }
   };
 
-  // Auto-execute when AI response arrives
+  const navigateToCommander = async (command: string) => {
+    try {
+      // Store the generated command for Commander to pick up
+      await LocalStorage.setItem("generatedCommand", command);
+      
+      await showToast({
+        style: Toast.Style.Success,
+        title: "Command generated!",
+        message: `Opening Commander with: ${command}`,
+      });
+
+      // Navigate to Commander component
+      push(<Commander />);
+    } catch (error) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Failed to navigate",
+        message: "Could not open Commander",
+      });
+    }
+  };
+
+  // Auto-navigate to Commander when AI response arrives
   useEffect(() => {
     if (aiResponse && isGenerating) {
       let cleanCommand = aiResponse
@@ -156,203 +174,13 @@ Generate the exact command:`;
       }
       
       setIsGenerating(false);
-      executeCommand(cleanCommand);
+      navigateToCommander(cleanCommand);
     }
   }, [aiResponse, isGenerating]);
 
-  const saveCommandHistory = async (command: string, output?: string, error?: string, executionPath?: string) => {
-    try {
-      const history = await LocalStorage.getItem<string>("commandHistory");
-      const commandHistory: CommandHistory[] = history ? JSON.parse(history) : [];
-      
-      const now = Date.now();
-      const existingIndex = commandHistory.findIndex((item) => item.command === command);
 
-      if (existingIndex !== -1) {
-        commandHistory[existingIndex] = {
-          ...commandHistory[existingIndex],
-          lastUsed: now,
-          useCount: commandHistory[existingIndex].useCount + 1,
-          output,
-          error,
-          executionPath,
-        };
-      } else {
-        commandHistory.push({
-          command,
-          lastUsed: now,
-          useCount: 1,
-          output,
-          error,
-          executionPath,
-        });
-      }
 
-      // Sort by most recently used first
-      commandHistory.sort((a, b) => b.lastUsed - a.lastUsed);
-
-      // Limit history size
-      if (commandHistory.length > preferences.maxHistorySize) {
-        commandHistory.splice(preferences.maxHistorySize);
-      }
-
-      await LocalStorage.setItem("commandHistory", JSON.stringify(commandHistory));
-    } catch (error) {
-      console.error("Failed to save command history:", error);
-    }
-  };
-
-  const executeCommand = async (command: string) => {
-    setIsExecuting(true);
-
-    try {
-      await showToast({
-        style: Toast.Style.Animated,
-        title: "Executing command...",
-        message: command,
-      });
-
-      const finderPath = await getCurrentFinderPath();
-      let finalCommand = command;
-
-      if (preferences.shellProfile && preferences.shellProfile.trim()) {
-        finalCommand = `source ${preferences.shellProfile} && ${command}`;
-      } else {
-        if (preferences.defaultShell.includes("zsh")) {
-          finalCommand = `source ~/.zshrc 2>/dev/null; ${command}`;
-        } else if (preferences.defaultShell.includes("bash")) {
-          finalCommand = `source ~/.bash_profile 2>/dev/null || source ~/.bashrc 2>/dev/null; ${command}`;
-        }
-      }
-
-      if (finderPath && finderPath.trim()) {
-        finalCommand = `cd "${finderPath}" && ${finalCommand}`;
-      }
-
-      const { stdout, stderr } = await execAsync(finalCommand, {
-        shell: preferences.defaultShell,
-        timeout: 30000,
-        env: {
-          ...process.env,
-          PATH: process.env.PATH,
-          HOME: process.env.HOME,
-          USER: process.env.USER,
-          NVM_DIR: process.env.NVM_DIR || `${process.env.HOME}/.nvm`,
-        },
-      });
-
-      if (stderr) {
-        await showToast({
-          style: Toast.Style.Failure,
-          title: "Command completed with warnings",
-          message: stderr,
-        });
-      } else {
-        await showToast({
-          style: Toast.Style.Success,
-          title: "Command executed successfully",
-        });
-      }
-
-      await saveCommandHistory(command, stdout, stderr, finderPath || undefined);
-
-      // Show detail view with the command result
-      const executedCommand = {
-        command,
-        lastUsed: Date.now(),
-        useCount: 1,
-        output: stdout,
-        error: stderr,
-        executionPath: finderPath || undefined,
-      };
-      setSelectedCommand(executedCommand);
-      setShowResult(true);
-
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      let suggestion = "";
-
-      // Provide helpful suggestions for common issues
-      if (errorMessage.includes("command not found")) {
-        suggestion = "Try setting a shell profile in preferences (e.g., ~/.zshrc)";
-      } else if (errorMessage.includes("permission denied")) {
-        suggestion = "Check if the command requires elevated permissions";
-      }
-      
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "Command failed",
-        message: suggestion ? `${errorMessage}\n\n💡 ${suggestion}` : errorMessage,
-      });
-
-      await saveCommandHistory(command, undefined, errorMessage);
-
-      // Show detail view with the error result
-      const failedCommand = {
-        command,
-        lastUsed: Date.now(),
-        useCount: 1,
-        output: undefined,
-        error: errorMessage,
-        executionPath: undefined,
-      };
-      setSelectedCommand(failedCommand);
-      setShowResult(true);
-    } finally {
-      setIsExecuting(false);
-    }
-  };
-
-  // Show execution result
-  if (showResult && selectedCommand) {
-    const formatOutput = (output: string | undefined, error: string | undefined) => {
-      if (error) {
-        return `## ❌ Error\n\n\`\`\`\n${error}\n\`\`\``;
-      }
-      if (output !== undefined) {
-        return `## ✅ Output\n\n\`\`\`\n${output || "No output"}\n\`\`\``;
-      }
-      return `## ℹ️ No Output Data\n\nThis command was executed before output tracking was enabled.`;
-    };
-
-    const markdown = `
-# ${selectedCommand.command}
-
-**Generated from:** "${searchText}"
-**Last executed:** ${new Date(selectedCommand.lastUsed).toLocaleString()}
-**Execution Path:** ${selectedCommand.executionPath || "N/A"}
-
----
-
-${formatOutput(selectedCommand.output, selectedCommand.error)}
-    `.trim();
-
-    return (
-      <Detail
-        markdown={markdown}
-        actions={
-          <ActionPanel>
-            <Action
-              title="Generate Another Command"
-              icon={Icon.ArrowLeft}
-              onAction={() => {
-                setShowResult(false);
-                setSelectedCommand(null);
-                setSearchText("");
-              }}
-            />
-            <Action
-              title="Execute Again"
-              icon={Icon.Play}
-              onAction={() => executeCommand(selectedCommand.command)}
-            />
-          </ActionPanel>
-        }
-      />
-    );
-  }
-
-  const isLoading = isGenerating || aiLoading || isExecuting;
+  const isLoading = isGenerating || aiLoading;
 
   return (
     <List
@@ -363,7 +191,7 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
       actions={
         <ActionPanel>
           <Action
-            title="Generate & Execute Command"
+            title="Generate & Open in Commander"
             icon={Icon.Wand}
             onAction={generateAndExecuteCommand}
           />
@@ -373,12 +201,12 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
       {searchText.trim() && !isLoading && (
         <List.Item
           title={`Generate command for: "${searchText}"`}
-          subtitle="Press Enter to generate and execute"
+          subtitle="Press Enter to generate and open in Commander"
           icon={{ source: Icon.Wand, tintColor: Color.Blue }}
           actions={
             <ActionPanel>
               <Action
-                title="Generate & Execute Command"
+                title="Generate & Open in Commander"
                 icon={Icon.Wand}
                 onAction={generateAndExecuteCommand}
               />
@@ -391,17 +219,13 @@ ${formatOutput(selectedCommand.output, selectedCommand.error)}
         <List.EmptyView
           icon={Icon.Wand}
           title="Ask Commander"
-          description="Describe what you want to do and I'll generate and execute the command for you"
+          description="Describe what you want to do and I'll generate the command and open it in Commander for you"
         />
       )}
 
       {isLoading && (
         <List.Item
-          title={
-            isGenerating || aiLoading
-              ? "🤖 Generating command with AI..."
-              : "⚡ Executing command..."
-          }
+          title="🤖 Generating command with AI..."
           subtitle={searchText}
           icon={{ source: Icon.Clock, tintColor: Color.Orange }}
         />

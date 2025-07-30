@@ -39,6 +39,7 @@ export default function Commander() {
   useEffect(() => {
     loadPreferences();
     loadCommandHistory();
+    loadGeneratedCommand();
   }, []);
 
   const loadPreferences = async () => {
@@ -58,6 +59,25 @@ export default function Commander() {
       }
     } catch {
       console.log("No command history found");
+    }
+  };
+
+  const loadGeneratedCommand = async () => {
+    try {
+      const generatedCommand = await LocalStorage.getItem<string>("generatedCommand");
+      if (generatedCommand) {
+        setSearchText(generatedCommand);
+        // Clear the stored command so it doesn't persist
+        await LocalStorage.removeItem("generatedCommand");
+        
+        await showToast({
+          style: Toast.Style.Success,
+          title: "Command generated!",
+          message: `Ready to execute: ${generatedCommand}`,
+        });
+      }
+    } catch {
+      console.log("No generated command found");
     }
   };
 
