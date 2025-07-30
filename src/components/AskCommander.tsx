@@ -10,15 +10,24 @@ import {
   Color,
   Detail,
   useNavigation,
+  Clipboard,
 } from "@raycast/api";
 import { useAI } from "@raycast/utils";
 import { LocalStorage } from "@raycast/api";
 import { Preferences } from "../types";
 import Commander from "./Commander";
 
+interface PromptHistory {
+  prompt: string;
+  generatedCommand: string;
+  lastUsed: number;
+  useCount: number;
+}
+
 export default function AskCommander() {
   const [searchText, setSearchText] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [promptHistory, setPromptHistory] = useState<PromptHistory[]>([]);
   const [preferences, setPreferences] = useState<Preferences>({
     maxHistorySize: 50,
     defaultShell: "/bin/zsh",
@@ -28,9 +37,10 @@ export default function AskCommander() {
 
   const { push } = useNavigation();
 
-  // Load preferences on component mount
+  // Load preferences and history on component mount
   useEffect(() => {
     loadPreferences();
+    loadPromptHistory();
   }, []);
 
   const loadPreferences = async () => {
@@ -40,6 +50,62 @@ export default function AskCommander() {
     } catch {
       console.log("Using default preferences");
     }
+  };
+
+  const loadPromptHistory = async () => {
+    try {
+      const history = await LocalStorage.getItem<string>("promptHistory");
+      if (history) {
+        setPromptHistory(JSON.parse(history));
+      }
+    } catch {
+      console.log("No prompt history found");
+    }
+  };
+
+  const savePromptHistory = async (history: PromptHistory[]) => {
+    try {
+      await LocalStorage.setItem("promptHistory", JSON.stringify(history));
+    } catch (error) {
+      console.error("Failed to save prompt history:", error);
+    }
+  };
+
+  const updatePromptHistory = (prompt: string, generatedCommand: string) => {
+    const now = Date.now();
+    const newHistory = [...promptHistory];
+
+    // Find existing prompt
+    const existingIndex = newHistory.findIndex((item) => item.prompt === prompt);
+
+    if (existingIndex !== -1) {
+      // Update existing prompt
+      newHistory[existingIndex] = {
+        ...newHistory[existingIndex],
+        lastUsed: now,
+        useCount: newHistory[existingIndex].useCount + 1,
+        generatedCommand, // Update with latest generated command
+      };
+    } else {
+      // Add new prompt
+      newHistory.push({
+        prompt,
+        generatedCommand,
+        lastUsed: now,
+        useCount: 1,
+      });
+    }
+
+    // Sort by most recently used first
+    newHistory.sort((a, b) => b.lastUsed - a.lastUsed);
+
+    // Limit history size
+    if (newHistory.length > preferences.maxHistorySize) {
+      newHistory.splice(preferences.maxHistorySize);
+    }
+
+    setPromptHistory(newHistory);
+    savePromptHistory(newHistory);
   };
 
   // AI prompt for generating CLI commands
@@ -132,6 +198,9 @@ Generate the exact command:`;
       // Store the generated command for Commander to pick up
       await LocalStorage.setItem("generatedCommand", command);
       
+      // Update prompt history
+      updatePromptHistory(searchText, command);
+      
       await showToast({
         style: Toast.Style.Success,
         title: "Command generated!",
@@ -182,6 +251,21 @@ Generate the exact command:`;
 
   const isLoading = isGenerating || aiLoading;
 
+  // Filter history based on search text
+  const filteredHistory = promptHistory.filter((item) =>
+    item.prompt.toLowerCase().includes(searchText.toLowerCase())
+  );
+
+  const generateFromHistoryItem = async (historyItem: PromptHistory) => {
+    // Set the search text to the history item's prompt
+    setSearchText(historyItem.prompt);
+    
+    // Wait a moment for the state to update, then generate
+    setTimeout(() => {
+      generateAndExecuteCommand();
+    }, 100);
+  };
+
   return (
     <List
       isLoading={isLoading}
@@ -215,7 +299,62 @@ Generate the exact command:`;
         />
       )}
 
-      {!searchText.trim() && !isLoading && (
+      {/* Show prompt history */}
+      {filteredHistory.length > 0 && (
+        <>
+          {filteredHistory.map((item, index) => (
+            <List.Item
+              key={`${item.prompt}-${item.lastUsed}`}
+              title={item.prompt}
+              subtitle={
+                `Generated: ${item.generatedCommand}\n` +
+                `Used ${item.useCount} time${item.useCount !== 1 ? "s" : ""} • Last used ${new Date(item.lastUsed).toLocaleDateString()}`
+              }
+              icon={{
+                source: Icon.Clock,
+                tintColor: Color.SecondaryText,
+              }}
+              accessories={[
+                { text: `#${index + 1}` },
+                { text: `${item.useCount}x` },
+              ]}
+              actions={
+                <ActionPanel>
+                  <Action
+                    title="Use This Prompt"
+                    icon={Icon.Wand}
+                    onAction={() => generateFromHistoryItem(item)}
+                  />
+                  <Action
+                    title="Copy Prompt"
+                    icon={Icon.CopyClipboard}
+                    onAction={async () => {
+                      await Clipboard.copy(item.prompt);
+                      await showToast({
+                        style: Toast.Style.Success,
+                        title: "Prompt copied to clipboard",
+                      });
+                    }}
+                  />
+                  <Action
+                    title="Copy Generated Command"
+                    icon={Icon.Terminal}
+                    onAction={async () => {
+                      await Clipboard.copy(item.generatedCommand);
+                      await showToast({
+                        style: Toast.Style.Success,
+                        title: "Command copied to clipboard",
+                      });
+                    }}
+                  />
+                </ActionPanel>
+              }
+            />
+          ))}
+        </>
+      )}
+
+      {!searchText.trim() && !isLoading && filteredHistory.length === 0 && (
         <List.EmptyView
           icon={Icon.Wand}
           title="Ask Commander"
