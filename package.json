@@ -12,6 +12,12 @@
       "title": "Commander",
       "description": "Run and manage your favorite CLI commands with LRU history",
       "mode": "view"
+    },
+    {
+      "name": "askCommandor",
+      "title": "Ask Commander",
+      "description": "Use AI to generate and execute CLI commands from natural language",
+      "mode": "view"
     }
   ],
   "preferences": [
